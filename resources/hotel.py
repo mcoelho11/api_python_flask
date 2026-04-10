@@ -1,85 +1,94 @@
 from flask_restful import Resource, reqparse
 from models.hotel_model import HotelModel
-from flask import jsonify
-from cria_banco import session, Session
+from flask_jwt_extended import jwt_required
+from cria_banco import session
 
-hoteis = [
-    {
-        'id': 'alpha',
-        'nome': 'Hotel Alpha',
-        'estrelas': 4.5,
-        'diaria': 420.34,
-    },
-    {
-        'id': 'bravo',
-        'nome': 'Hotel Bravo', 
-        'estrelas': 4.0,
-        'diaria': 380.90,
-    },
-    {
-        'id': 'charlie',
-        'nome': 'Hotel Charlie',
-        'estrelas': 3.5,
-        'diaria': 320.00,
-    }
-    
-]
+path_params = reqparse.RequestParser()
+path_params.add_argument('nome', type=str, location='args')
+path_params.add_argument('estrelas_min', type=float, location='args')
+path_params.add_argument('estrelas_max', type=float, location='args')
+path_params.add_argument('diaria_min', type=float, location='args')
+path_params.add_argument('diaria_max', type=float, location='args')
+
+def normalize_path_params(nome = None, estrelas_min=0, estrelas_max = 5, diaria_min = 0, diaria_max = 10000, **dados):
+    return {
+            'nome': nome,
+            'estrelas_min': estrelas_min,
+            'estrelas_max': estrelas_max,
+            'diaria_min': diaria_min,
+            'diaria_max': diaria_max,
+        }
+
 
 class Hoteis(Resource):
     def get(self):
-        try:
-            Session.begin()
-            hoteis = session.query(HotelModel).all()
-            session.commit() 
-        except Exception as e:
-            print(str(e))
-            session.rollback() 
+        dados = path_params.parse_args()
+        dados_validos = { chave:dados[chave] for chave in dados if dados[chave] is not None }
+        filters = normalize_path_params(**dados_validos)
+        
+        if not filters.get('nome'):
+            query = session.query(HotelModel).filter(
+                HotelModel.estrelas >= filters.get('estrelas_min'),
+                HotelModel.estrelas <= filters.get('estrelas_max'),
+                HotelModel.diaria >= filters.get('diaria_min'),
+                HotelModel.diaria <= filters.get('diaria_max')
+            )
+        else:
+            query = session.query(HotelModel).filter(
+                HotelModel.nome == filters.get('nome'),
+                HotelModel.estrelas >= filters.get('estrelas_min'),
+                HotelModel.estrelas <= filters.get('estrelas_max'),
+                HotelModel.diaria >= filters.get('diaria_min'),
+                HotelModel.diaria <= filters.get('diaria_max')
+            )
+        
+        hoteis = query.all()
             
         response = []
         for hotel in hoteis:
             response.append(hotel.toJson())
         return response
-
     
 class Hotel(Resource):
     argumentos = reqparse.RequestParser()
-    argumentos.add_argument('name')
-    argumentos.add_argument('estrelas')
+    argumentos.add_argument('nome', required = True)
+    argumentos.add_argument('estrelas', required = True)
     argumentos.add_argument('diaria')
-
-    def find_hotel(id):
-        for hotel in hoteis:
-            if hotel['id'] == id:
-                return hotel
-        return None
-
+    
     def get(self, id):
-        hotel = Hotel.find_hotel(id)
-        if hotel: 
-            return hotel
-        return {'message': 'Hotel not found.'}, 404
-
+        hotel = HotelModel.find_hotel(id)
+        
+        if hotel:
+            return hotel.toJson()
+        return { 'Message': 'Hotel not found.' }, 404
+    
+    @jwt_required()
     def post(self, id):
+        if HotelModel.find_hotel(id):
+            return {"message": "Hotel id '{}' already exists.".format(id)}, 400
+                
         dados = Hotel.argumentos.parse_args()
         hotel_obj = HotelModel(id, **dados)
-        novo_hotel = hotel_obj.json()
-        hoteis.append(novo_hotel)
-
-        return novo_hotel, 200
-
+        hotel_obj.save_hotel()
+        
+        return hotel_obj.toJson()
+    
+    @jwt_required()
     def put(self, id):
         dados = Hotel.argumentos.parse_args()
-        hotel_obj = HotelModel(id, **dados)
-        novo_hotel = hotel_obj.json()
-        hotel = Hotel.find_hotel(id)
+        hotel_encontrado = HotelModel.find_hotel(id)
         
-        if hotel: 
-            hotel.update(novo_hotel)
-            return novo_hotel, 200
-        hoteis.append(novo_hotel)
-        return novo_hotel, 201
-
+        if hotel_encontrado:
+            hotel_encontrado.update_hotel(**dados)
+            hotel_encontrado.save_hotel()
+            return hotel_encontrado.toJson(), 200
+        
+        return { "Message": "Hotel not found. Use POST to create a new hotel." }
+    
+    @jwt_required()
     def delete(self, id):
-        global hoteis
-        hoteis = [hotel for hotel in hoteis if hotel['id'] != id]
-        return {'message': 'Hotel deleted.'}        
+        hotel = HotelModel.find_hotel(id)
+        if hotel:
+            hotel.delete_hotel()
+            return{ "Message" : "Hotel deleted." }
+        return { "Message" : "Hotel not found." }, 404

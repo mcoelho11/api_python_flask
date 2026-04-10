@@ -1,4 +1,4 @@
-from cria_banco import Base
+from cria_banco import Base, session, queryFromDb
 from sqlalchemy import Column, String, Float, Integer
 
 class Schema:
@@ -26,5 +26,25 @@ class HotelModel(Base, Schema):
         self.nome = nome
         self.estrelas = estrelas
         self.diaria = diaria
-
-
+        
+    @classmethod
+    def find_hotel(cls, id):
+        hotel = queryFromDb(session.query(cls).filter_by(id = id).first())
+        
+        if hotel:
+            return hotel
+        return None
+    
+    def save_hotel(self):
+        queryFromDb(session.add(self))  
+        
+    def update_hotel(self, nome, estrelas, diaria):
+        self.nome = nome
+        self.estrelas = estrelas
+        self.diaria = diaria
+        
+    def delete_hotel(self):
+        queryFromDb(session.delete(self))
+        
+        
+        
