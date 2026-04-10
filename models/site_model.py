@@ -15,4 +15,16 @@ class Schema():
 class SiteModel(Base, Schema):
     __tablename__ = 'SITE'
     
-    site_id = Column()
+    site_id = Column(Integer, primary_key=True)
+    url = Column(String(80))
+    
+    def __init__(self, url):
+        self.url = url
+        
+    @classmethod
+    def find_site(cls, url):
+        site = queryFromDb(session.query(cls).filter_by(url=url).first())
+        
+        if site:
+           return site
+        return None 
